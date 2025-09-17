@@ -3,27 +3,35 @@ import llm_gemini
 
 app = Flask(__name__)
 
-@app.route("/")
-def chat():
-    return render_template("chat.html")
+import re
+
+def is_safe_code(code):
+    # Basic check for dangerous patterns
+    unsafe_patterns = ["import", "exec", "eval", "subprocess", "os.", "open(", "system(", "socket"]
+    return not any(re.search(pattern, code.lower()) for pattern in unsafe_patterns)
 
 @app.route("/ask", methods=["POST"])
 def ask():
     user_prompt = request.json.get("prompt")
+    try:
+        code = llm_gemini.generate_response(user_prompt)
 
-    # Check if the prompt is related to code
-    if not any(keyword in user_prompt.lower() for keyword in ["python"]):
-        # If it's a general question, return the Gemini response directly
-        try:
-            gemini_response = llm_gemini.generate_response(user_prompt)
+        if not is_safe_code(code):
             return jsonify({
-                "generated_code": None,
-                "output": gemini_response
-            })
-        except Exception as e:
-            return jsonify({
-                "error": str(e)
-            }), 500
+                "error": "Unsafe code detected. Execution blocked."
+            }), 400
+        safe_globals = {"__builtins__": {"print": print, "range": range, "len": len}}
+        output = {}
+        exec(code, safe_globals, output)
+        result = output.get("result", "No result found - store output in variable 'result'")
+        return jsonify({
+            "generated_code": code,
+            "output": result
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
     code = llm_gemini.generate_response(user_prompt)
